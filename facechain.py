@@ -44,11 +44,32 @@ def descriptor_distance(a: np.ndarray, b: np.ndarray) -> float:
     return float(np.linalg.norm(a - b) / np.sqrt(a.size))
 
 
+def fetch_x_post(post_url: str) -> dict[str, Any]:
+    post_id = post_url.rstrip('/').split('/')[-1].split('?')[0]
+    response = requests.get(f"https://api.fxtwitter.com/status/{post_id}", headers={"User-Agent": "FaceChain-demo/1.0"}, timeout=30)
+    response.raise_for_status()
+    tweet = response.json().get("tweet", {})
+    if not tweet:
+        raise RuntimeError("X post could not be retrieved")
+    return tweet
+
+
 def search_bluesky(query: str, limit: int = 50) -> list[dict[str, Any]]:
     url = "https://api.bsky.app/xrpc/app.bsky.feed.searchPosts"
     response = requests.get(url, params={"q": query, "limit": limit}, timeout=30)
     response.raise_for_status()
     return response.json().get("posts", [])
+
+
+def get_x_images(tweet: dict[str, Any]) -> list[tuple[bytes, str]]:
+    results = []
+    for media in tweet.get("media", {}).get("all", []):
+        url = media.get("url") or media.get("thumbnail_url")
+        if url:
+            response = requests.get(url, headers={"User-Agent": "FaceChain-demo/1.0"}, timeout=30)
+            response.raise_for_status()
+            results.append((response.content, url))
+    return results
 
 
 def get_image_blob(post: dict[str, Any]) -> tuple[bytes, str] | None:
@@ -73,16 +94,20 @@ def post_url(post: dict[str, Any]) -> str:
     return f"https://bsky.app/profile/{author}/post/{rkey}"
 
 
-def find_match(reference: Path, query: str, limit: int, threshold: float, workdir: Path) -> dict[str, Any]:
+def find_match(reference: Path, query: str | None, x_url: str | None, limit: int, threshold: float, workdir: Path) -> dict[str, Any]:
     reference_encoding, _ = detect_and_encode(reference)
-    posts = search_bluesky(query, limit)
-    checked = 0
-    for post in posts:
-        try:
+    if x_url:
+        tweet = fetch_x_post(x_url)
+        candidates = [(tweet, data, url) for data, url in get_x_images(tweet)]
+    else:
+        candidates = []
+        for post in search_bluesky(query or "", limit):
             downloaded = get_image_blob(post)
-            if not downloaded:
-                continue
-            image_bytes, image_url = downloaded
+            if downloaded:
+                candidates.append((post, downloaded[0], downloaded[1]))
+    checked = 0
+    for post, image_bytes, image_url in candidates:
+        try:
             candidate_path = workdir / "candidate.jpg"
             candidate_path.write_bytes(image_bytes)
             image = cv2.imread(str(candidate_path))
@@ -101,12 +126,12 @@ def find_match(reference: Path, query: str, limit: int, threshold: float, workdi
             similarity = max(0.0, 1.0 - best_distance)
             if best_distance <= threshold:
                 record = {
-                    "source": "Bluesky public search API",
+                    "source": "X public post retrieved through live API" if x_url else "Bluesky public search API",
                     "query": query,
-                    "post_url": post_url(post),
-                    "author_handle": post.get("author", {}).get("handle"),
-                    "text": post.get("record", {}).get("text", ""),
-                    "created_at": post.get("record", {}).get("createdAt"),
+                    "post_url": x_url or post_url(post),
+                    "author_handle": post.get("author", {}).get("screen_name") if x_url else post.get("author", {}).get("handle"),
+                    "text": post.get("text", "") if x_url else post.get("record", {}).get("text", ""),
+                    "created_at": post.get("created_at") if x_url else post.get("record", {}).get("createdAt"),
                     "image_url": image_url,
                     "image_sha256": sha256_bytes(image_bytes),
                     "face_distance": best_distance,
@@ -117,13 +142,14 @@ def find_match(reference: Path, query: str, limit: int, threshold: float, workdi
                 return record
         except (requests.RequestException, ValueError, cv2.error) as exc:
             print(f"Skipping candidate: {exc}", file=sys.stderr)
-    raise RuntimeError(f"No matching face found in {len(posts)} search results ({checked} images contained faces). Try a broader query or higher --threshold.")
+    raise RuntimeError(f"No matching face found in {len(candidates)} candidate media items ({checked} images contained faces). Try a broader query or higher --threshold.")
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Consent-based face scan, genuine Bluesky search, and blockchain verification")
     parser.add_argument("--reference", required=True, type=Path, help="One-face reference image; use only with subject consent")
-    parser.add_argument("--query", required=True, help="Bluesky search query for the consented subject/topic")
+    parser.add_argument("--query", help="Bluesky search query for the consented subject/topic")
+    parser.add_argument("--x-url", help="Authorized public X post URL; retrieved live and searched across its media")
     parser.add_argument("--chain", type=Path, default=Path("artifacts/chain.json"))
     parser.add_argument("--limit", type=int, default=50)
     parser.add_argument("--threshold", type=float, default=0.55, help="normalized OpenCV descriptor distance threshold; lower is stricter")
@@ -134,8 +160,10 @@ def main() -> int:
     temp = args.out.parent / ".candidate.jpg"
     try:
         print(f"[1/3] Detecting and encoding one face from {args.reference}...")
-        print(f"[2/3] Searching Bluesky for public posts matching query: {args.query!r}")
-        record = find_match(args.reference, args.query, args.limit, args.threshold, args.out.parent)
+        print(f"[2/3] Retrieving and searching authorized X post media: {args.x_url or args.query!r}")
+        if not args.query and not args.x_url:
+            parser.error("provide either --query or --x-url")
+        record = find_match(args.reference, args.query, args.x_url, args.limit, args.threshold, args.out.parent)
         record.pop("checked_face_images", None)
         args.out.write_text(json.dumps(record, indent=2) + "\n")
         print(f"    Found: {record['post_url']}")
