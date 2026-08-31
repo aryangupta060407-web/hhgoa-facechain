@@ -123,7 +123,7 @@ def find_match(reference: Path, query: str | None, x_url: str | None, limit: int
                 encodings.append(((crop - crop.mean()) / (crop.std() + 1e-6)).flatten())
             checked += 1
             best_distance = min(descriptor_distance(e, reference_encoding) for e in encodings)
-            similarity = max(0.0, 1.0 - best_distance)
+            similarity = 1.0 / (1.0 + best_distance)
             if best_distance <= threshold:
                 record = {
                     "source": "X public post retrieved through live API" if x_url else "Bluesky public search API",
@@ -152,7 +152,7 @@ def main() -> int:
     parser.add_argument("--x-url", help="Authorized public X post URL; retrieved live and searched across its media")
     parser.add_argument("--chain", type=Path, default=Path("artifacts/chain.json"))
     parser.add_argument("--limit", type=int, default=50)
-    parser.add_argument("--threshold", type=float, default=0.55, help="normalized OpenCV descriptor distance threshold; lower is stricter")
+    parser.add_argument("--threshold", type=float, default=1.20, help="normalized OpenCV descriptor distance threshold; lower is stricter")
     parser.add_argument("--out", type=Path, default=Path("artifacts/result.json"))
     args = parser.parse_args()
     args.out.parent.mkdir(parents=True, exist_ok=True)

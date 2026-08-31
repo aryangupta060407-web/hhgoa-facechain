@@ -28,17 +28,22 @@ pip install -r requirements.txt
 
 ## Run
 
-Place a **single-face, consented reference image** at `examples/reference.jpg`. Choose a query that the subject has authorized, such as their public Bluesky handle or an agreed keyword:
+Place a **single-face, consented reference image** at `examples/reference.png`. For the strongest demo, use the authorized public X post supplied by the subject:
 
 ```bash
 python facechain.py \
-  --reference examples/reference.jpg \
-  --query "authorized-public-handle.bsky.social" \
-  --limit 50 \
-  --threshold 0.60
+  --reference examples/reference.png \
+  --x-url "https://x.com/Aryannn_6476476/status/2086348435729575971?s=20" \
+  --threshold 1.20
 ```
 
-The command writes `artifacts/result.json` and `artifacts/chain.json`. A successful run prints the real Bluesky post URL, the face distance, the block fingerprint, and:
+The same program also supports a genuine Bluesky search when an authorized public query is available:
+
+```bash
+python facechain.py --reference examples/reference.png --query "authorized-public-handle.bsky.social" --limit 50
+```
+
+The command writes `artifacts/result.json` and `artifacts/chain.json`. A successful run prints the real public-post URL, the face distance, the block fingerprint, and:
 
 ```text
 SUCCESS: blockchain verification = True
@@ -67,6 +72,6 @@ The Bluesky endpoint returns public search results and availability can change. 
 
 ## References
 
-[1]: https://github.com/ageitgey/face_recognition "face_recognition Python library"
+[1]: https://docs.opencv.org/4.x/db/d28/tutorial_cascade_classifier.html "OpenCV cascade classifier documentation"
 [2]: https://docs.bsky.app/docs/api/app-bsky-feed-search-posts "Bluesky searchPosts API"
 [3]: https://docs.python.org/3/library/hashlib.html "Python hashlib documentation"
