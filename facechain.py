@@ -51,9 +51,27 @@ def search_bluesky(query: str, limit: int) -> list[dict[str, Any]]:
     return response.json().get("posts", [])
 
 
+def search_x_profile(handle: str, limit: int) -> list[dict[str, Any]]:
+    import re
+    from urllib.parse import quote
+    page = requests.get(f"https://x.com/{quote(handle.lstrip('@'))}", headers={"User-Agent": "Mozilla/5.0"}, timeout=30)
+    page.raise_for_status()
+    ids = list(dict.fromkeys(re.findall(r"/status/(\d{15,})", page.text)))[:limit]
+    posts = []
+    for post_id in ids:
+        response = requests.get(f"https://api.fxtwitter.com/status/{post_id}", headers=HEADERS, timeout=30)
+        if response.ok and response.json().get("tweet"):
+            posts.append(response.json()["tweet"])
+    return posts
+
+
 def post_url(post: dict[str, Any]) -> str:
     author = post.get("author", {}).get("handle", "unknown")
     return f"https://bsky.app/profile/{author}/post/{post.get('uri', '').rsplit('/', 1)[-1]}"
+
+
+def x_image_urls(post: dict[str, Any]) -> list[str]:
+    return [m.get("url") for m in post.get("media", {}).get("all", []) if m.get("url")]
 
 
 def image_urls(post: dict[str, Any]) -> list[str]:
@@ -69,12 +87,13 @@ def retrieve_image(url: str) -> bytes:
 
 def find_best(reference: Path, query: str, limit: int, threshold: float, workdir: Path) -> tuple[dict[str, Any], int, int]:
     reference_encoding = detect_and_encode(reference)
-    posts = search_bluesky(query, limit)
+    x_mode = query.startswith("x:")
+    posts = search_x_profile(query[2:], limit) if x_mode else search_bluesky(query, limit)
     best: dict[str, Any] | None = None
     candidate_images = 0
     face_images = 0
     for post in posts:
-        for url in image_urls(post):
+        for url in (x_image_urls(post) if x_mode else image_urls(post)):
             candidate_images += 1
             try:
                 data = retrieve_image(url)
@@ -97,7 +116,12 @@ def find_best(reference: Path, query: str, limit: int, threshold: float, workdir
         actual = "none" if best is None else f"{best['face_distance']:.4f}"
         raise RuntimeError(f"No candidate passed the threshold. Searched {len(posts)} posts / {candidate_images} images; {face_images} contained faces; best distance={actual}. Increase --threshold only after validating consented demo data.")
     post = best["post"]
-    return ({"source": "Bluesky public search API", "query": query, "posts_retrieved": len(posts), "candidate_images_retrieved": candidate_images, "face_images_checked": face_images, "post_url": post_url(post), "author_handle": post.get("author", {}).get("handle"), "text": post.get("record", {}).get("text", ""), "created_at": post.get("record", {}).get("createdAt"), "image_url": best["image_url"], "image_sha256": best["image_sha256"], "face_distance": best["face_distance"], "face_similarity": 1.0 / (1.0 + best["face_distance"]), "retrieved_at_unix": int(time.time())}, len(posts), candidate_images)
+    source = "Live X profile search via public page + post API" if x_mode else "Bluesky public search API"
+    url = post.get("url") if x_mode else post_url(post)
+    author = post.get("author", {}).get("screen_name") if x_mode else post.get("author", {}).get("handle")
+    text = post.get("text", "") if x_mode else post.get("record", {}).get("text", "")
+    created = post.get("created_at") if x_mode else post.get("record", {}).get("createdAt")
+    return ({"source": source, "query": query, "posts_retrieved": len(posts), "candidate_images_retrieved": candidate_images, "face_images_checked": face_images, "post_url": url, "author_handle": author, "text": text, "created_at": created, "image_url": best["image_url"], "image_sha256": best["image_sha256"], "face_distance": best["face_distance"], "face_similarity": 1.0 / (1.0 + best["face_distance"]), "retrieved_at_unix": int(time.time())}, len(posts), candidate_images)
 
 
 def main() -> int:
@@ -113,7 +137,7 @@ def main() -> int:
     args.chain.parent.mkdir(parents=True, exist_ok=True)
     try:
         print("Face detected and encoded")
-        print(f"Live search performed: query={args.query!r}, limit={args.limit}")
+        print(f"Live search performed: source={'X profile' if args.query.startswith('x:') else 'Bluesky'}, query={args.query!r}, limit={args.limit}")
         record, posts, images = find_best(args.reference, args.query, args.limit, args.threshold, args.out.parent)
         args.out.write_text(json.dumps(record, indent=2) + "\n")
         print(f"Candidates retrieved: {posts} posts / {images} images")
