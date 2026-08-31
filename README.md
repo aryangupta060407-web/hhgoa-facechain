@@ -11,7 +11,7 @@ It is designed for a **consented subject**. The reference photo must be supplied
 | Stage | What happens | Visible evidence |
 |---|---|---|
 | Face scan | OpenCV detects exactly one face and creates a normalized face descriptor. | `Face detected and encoded` |
-| Genuine search | The program calls Bluesky’s live public `searchPosts` API using the supplied query. It does not contain a pre-selected post. | Query, post count, and image count |
+| Genuine search | The program uses Bluesky’s live public `searchPosts` API for normal queries, or performs a live X profile-page search plus public post retrieval when the query begins with `x:`. It does not contain a pre-selected post. | Source, query, post count, and image count |
 | Candidate comparison | Every image in the retrieved posts is downloaded, faces are detected, and all face-bearing candidates are scored. | Number checked, best URL, distance, similarity |
 | Fingerprint | The selected post metadata is canonicalized and hashed with SHA-256. The image is also hashed. | Fingerprint values in `result.json` |
 | Blockchain | The fingerprint is recorded in a deterministic local hash chain. | Block hash and transaction hash |
@@ -59,7 +59,7 @@ Hashes compared
 ✅ BLOCKCHAIN VERIFICATION PASSED
 ```
 
-The public X post previously supplied for development can also be used as an authorized evidence reference, but the official final command is intentionally **query-based** so the search step is genuine and not dependent on a hardcoded URL.
+For this reference image, the reproducible live-search command is `--query 'x:Aryannn_6476476'`. The program discovers post IDs from the public X profile page, retrieves those posts through a public endpoint, and compares their media; the matching post URL is not hardcoded. A normal query without the `x:` prefix uses Bluesky’s live search API.
 
 ## Tamper demonstration
 
@@ -88,7 +88,7 @@ Show the reference image, run the successful command, pause on the live query an
 
 ## Known limitations
 
-The Bluesky public API, post availability, search ranking, rate limits, and image URLs can change. The lightweight OpenCV descriptor is a demonstration signal, not an identity proof, and the threshold should be validated on the consented demo data. A local simulated chain is not equivalent to a public blockchain explorer record. The program stores post metadata and hashes rather than the downloaded social-media image.
+Bluesky and X public endpoints, profile/post availability, search ranking, rate limits, and image URLs can change. The lightweight OpenCV descriptor is a demonstration signal, not an identity proof, and the threshold should be validated on the consented demo data. A local simulated chain is not equivalent to a public blockchain explorer record. The program stores post metadata and hashes rather than the downloaded social-media image.
 
 ## References
 
